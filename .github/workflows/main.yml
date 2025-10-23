@@ -2,15 +2,38 @@ name: Build Windows EXE
 
 on:
   push:
-    branches: [ main ]      # 如果你的分支叫 master 就改成 master
+    branches: [ main ]         # 如果你的默认分支不是 main，请改成 master 或你的分支名
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: windows-latest
+
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
+
+      # === 诊断：显示仓库目录结构 ===
+      - name: Show repo tree
+        run: |
+          echo "Repository root content:"
+          Get-ChildItem -Recurse | Select-Object FullName
+
+      # === 自动探测脚本所在目录（根目录 或 call_repeat/）===
+      - name: Detect script directory
+        id: detect
+        shell: pwsh
+        run: |
+          if (Test-Path "call_repeat/repeat_final.py") {
+            "SCRIPT_DIR=call_repeat" | Out-File -FilePath $env:GITHUB_ENV -Append
+            Write-Host "Detected script dir: call_repeat"
+          } elseif (Test-Path "repeat_final.py") {
+            "SCRIPT_DIR=." | Out-File -FilePath $env:GITHUB_ENV -Append
+            Write-Host "Detected script dir: repository root"
+          } else {
+            Write-Error "repeat_final.py not found in repo root or call_repeat/. Please check file location."
+            exit 1
+          }
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -18,28 +41,41 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
+        shell: pwsh
         run: |
           python -m pip install -U pip
-          if (Test-Path call_repeat/requirements.txt) {
-            pip install -r call_repeat/requirements.txt
+          if (Test-Path "$env:SCRIPT_DIR/requirements.txt") {
+            pip install -r "$env:SCRIPT_DIR/requirements.txt"
           } else {
             pip install pyinstaller pandas openpyxl
           }
 
       - name: Build EXE with PyInstaller
-        working-directory: call_repeat
+        shell: pwsh
         run: |
-          pyinstaller --name "重复来电分类工具" ^
-            --onefile ^
-            --windowed ^
-            --clean ^
-            --collect-all openpyxl ^
-            --collect-submodules pandas ^
-            repeat_final.py
+          pyinstaller `
+            --name "重复来电分类工具" `
+            --onefile `
+            --windowed `
+            --clean `
+            --collect-all openpyxl `
+            --collect-submodules pandas `
+            "$env:SCRIPT_DIR/repeat_final.py"
+
+      # === 诊断：展示 dist 输出位置 ===
+      - name: Show dist content
+        shell: pwsh
+        run: |
+          if (Test-Path "$env:SCRIPT_DIR/dist") {
+            Get-ChildItem "$env:SCRIPT_DIR/dist" -Recurse | Select-Object FullName
+          } else {
+            Write-Error "dist folder not found under $env:SCRIPT_DIR"
+            exit 1
+          }
 
       - name: Upload built EXE
         uses: actions/upload-artifact@v4
         with:
           name: windows-exe
-          path: call_repeat/dist/*
+          path: ${{ env.SCRIPT_DIR }}/dist/*
           if-no-files-found: error
