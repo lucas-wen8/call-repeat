@@ -1,0 +1,65 @@
+name: Build Windows EXE
+
+on:
+  push:
+    branches: [ main ]      # 若默认分支不是 main，请改成 master 或你的分支名
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Show repo tree (for debugging)
+        run: |
+          Write-Host "== Repository tree =="
+          Get-ChildItem -Recurse | Select-Object FullName
+
+      - name: Detect script directory
+        run: |
+          if (Test-Path "call_repeat/repeat_final.py") {
+            $dir = "call_repeat"
+          } elseif (Test-Path "repeat_final.py") {
+            $dir = "."
+          } else {
+            throw "repeat_final.py not found in repo root or call_repeat/."
+          }
+          "SCRIPT_DIR=$dir" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "SCRIPT_DIR=$dir"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies (no 'tk')
+        run: |
+          python -m pip install -U pip
+          pip install pyinstaller pandas openpyxl
+
+      - name: Build EXE with PyInstaller
+        run: |
+          pyinstaller --name "重复来电分类工具" --onefile --windowed --clean `
+            --collect-all openpyxl --collect-submodules pandas `
+            "$env:SCRIPT_DIR/repeat_final.py"
+
+      - name: Show dist content
+        run: |
+          if (Test-Path "$env:SCRIPT_DIR/dist") {
+            Get-ChildItem "$env:SCRIPT_DIR/dist" -Recurse | Select-Object FullName
+          } else {
+            throw "dist folder not found under $env:SCRIPT_DIR"
+          }
+
+      - name: Upload built EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-exe
+          path: ${{ env.SCRIPT_DIR }}/dist/*
+          if-no-files-found: error
